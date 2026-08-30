@@ -1,0 +1,8 @@
+node_modules
+node_modules/
+dist/
+coverage/
+*.log
+.env
+temp-*.json
+temp-*.generated.ts

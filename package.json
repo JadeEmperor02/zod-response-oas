@@ -1,0 +1,63 @@
+{
+  "name": "zod-response-oas",
+  "version": "0.1.0",
+  "description": "Express + Zod router that validates requests, and infers OpenAPI response schemas directly from your sendSuccess()/sendError() call sites — no separate response schema to write or keep in sync.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "zod-response-oas": "./bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "express",
+    "zod",
+    "openapi",
+    "swagger",
+    "typescript",
+    "codegen"
+  ],
+  "peerDependencies": {
+    "express": "^4.19.2 || ^5.0.0",
+    "zod": "^4.0.0",
+    "@asteasolutions/zod-to-openapi": "^9.0.0"
+  },
+  "dependencies": {
+    "ts-morph": "^28.0.0",
+    "ts-to-zod": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.0",
+    "express": "^4.19.2",
+    "zod": "^4.0.0",
+    "@asteasolutions/zod-to-openapi": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": {
+    "name": "JadeEmperor02"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JadeEmperor02/zod-response-oas.git"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}
