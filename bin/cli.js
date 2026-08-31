@@ -30,7 +30,7 @@ if (command === "generate") {
   });
 
   const withWarnings = results.filter((r) => r.warnings.length > 0);
-  const withMultipleShapes = results.filter((r) => r.typeTexts.length > 1);
+  const withMultipleShapes = results.filter((r) => r.variants.length > 1);
 
   console.log(
     `Extracted response shapes for ${results.length} handler(s) → ${shapesOutputPath}`,
@@ -39,8 +39,10 @@ if (command === "generate") {
     console.log(
       `\n${withMultipleShapes.length} handler(s) have branching response shapes (rendered as oneOf):`,
     );
-    for (const r of withMultipleShapes)
+
+    for (const r of withMultipleShapes) {
       console.log(`  ${r.file} :: ${r.handler}`);
+    }
   }
   if (withWarnings.length > 0) {
     console.log(`\n${withWarnings.length} handler(s) have warnings:`);
