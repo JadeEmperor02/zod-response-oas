@@ -32,7 +32,7 @@ function resolveGeneratedResponse(
   handler: RequestHandler,
   routeLabel: string,
   strict: boolean,
-): GeneratedResponseSchemaEntry | null | undefined {
+): GeneratedResponseSchemaEntry | undefined {
   const name = handler.name;
 
   if (!name) {
@@ -291,7 +291,10 @@ export function createSmartRouter(options: SmartRouterOptions) {
 
     const successStatusCode = method === "post" ? 201 : 200;
     const resolvedEntry = config.response
-      ? ({ schema: config.response, kind: "data" } as GeneratedResponseSchemaEntry)
+      ? ({
+          schema: config.response,
+          kind: "data",
+        } as GeneratedResponseSchemaEntry)
       : resolveGeneratedResponse(
           config.handler,
           fullPath,
@@ -299,13 +302,13 @@ export function createSmartRouter(options: SmartRouterOptions) {
         );
 
     const successSchema =
-      resolvedEntry === null
-        ? zSuccessResponse()
-        : resolvedEntry === undefined
-          ? z.any()
-          : (resolvedEntry.kind === "response"
-              ? (resolvedEntry.schema as z.ZodType)
-              : zSuccessResponse(resolvedEntry.schema as z.ZodType));
+      resolvedEntry === undefined
+        ? z.any()
+        : resolvedEntry.schema === null
+          ? zSuccessResponse()
+          : resolvedEntry.kind === "response"
+            ? resolvedEntry.schema
+            : zSuccessResponse(resolvedEntry.schema);
 
     openApiRegistry.registerPath({
       method,

@@ -278,6 +278,43 @@ function extractDataTypeText(
   }
 
   const dataType = dataInitializer.getType();
+
+  const aliasSymbol = dataType.getAliasSymbol();
+  const symbol = dataType.getSymbol();
+  const aliasName = aliasSymbol?.getName();
+  const symbolName = symbol?.getName();
+
+  if (symbolName === "HydratedDocument" || aliasName === "HydratedDocument") {
+    const typeArgs = dataType.getTypeArguments();
+    const decls = (symbol ?? aliasSymbol)?.getDeclarations() ?? [];
+    const isInterface = decls.some((d) => Node.isInterfaceDeclaration(d));
+    const isFromMongoose = decls.some(isMongooseDeclaration);
+
+    // interface → unwrap T, no warning
+    if (typeArgs.length > 0 && (isInterface || isFromMongoose)) {
+      return normalizeSerializableType(typeArgs[0], dataInitializer);
+    }
+
+    // type alias → warn, then normalize
+    if (
+      typeArgs.length > 0 &&
+      aliasName === "HydratedDocument" &&
+      !isInterface
+    ) {
+      warnings.push(
+        `line ${line} — "data" looks like a raw Mongoose document (non-nominal HydratedDocument type alias); ...`,
+      );
+      return normalizeSerializableType(dataType, dataInitializer);
+    }
+  }
+
+  // Expanded intersection with document methods, name already gone
+  if (looksLikeLocalMongooseStandIn(dataType, dataInitializer)) {
+    warnings.push(
+      `line ${line} — "data" looks like a raw Mongoose document (methods/internal fields on the type); ...`,
+    );
+  }
+
   return normalizeSerializableType(dataType, dataInitializer);
 }
 
@@ -290,15 +327,67 @@ function isExternalDeclaration(node: Node): boolean {
   return filePath.includes(`${path.sep}node_modules${path.sep}`);
 }
 
+function looksLikeLocalMongooseStandIn(type: Type, location: Node): boolean {
+  const text = type.getText(location);
+  if (text.includes("HydratedDocument") || text.includes("FlattenMaps")) {
+    return true;
+  }
+  const methodNames = new Set(["save", "populate", "toObject", "toJSON"]);
+  for (const prop of type.getProperties()) {
+    if (!methodNames.has(prop.getName())) continue;
+    try {
+      if (prop.getTypeAtLocation(location).getCallSignatures().length > 0) {
+        return type.getIntersectionTypes().length > 0;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
 /**
  * Heuristic detector only — used to decide when to run property-based
  * extraction. Stripping still keys off declaration origin, not this list.
  */
 function looksLikeMongooseDocument(type: Type): boolean {
+  const symbol = type.getSymbol() ?? type.getAliasSymbol();
+  const name = symbol?.getName();
+
+  // Nominal HydratedDocument / Document / FlattenMaps:
+  // only trust the symbol when it actually comes from mongoose.
+  if (
+    symbol &&
+    (name === "HydratedDocument" ||
+      name === "Document" ||
+      name === "FlattenMaps")
+  ) {
+    const declarations = symbol.getDeclarations();
+
+    if (declarations.some(isMongooseDeclaration)) {
+      return true;
+    }
+  }
+
+  /*
+   * Expanded Mongoose types often lose their nominal symbol and are printed
+   * as intersections such as:
+   *
+   *   FlattenMaps<T> &
+   *   Document<...> &
+   *   Required<{ _id: ... }> &
+   *   { __v: number }
+   *
+   * These are exactly the shapes we want to normalize.
+   *
+   * IMPORTANT: HydratedDocument is intentionally NOT included here.
+   * A consumer can define a local type named HydratedDocument<T>, and
+   * extractDataTypeText() explicitly rejects that case unless its symbol
+   * belongs to mongoose.
+   */
   const text = type.getText();
+
   if (
     text.includes("FlattenMaps") ||
-    text.includes("HydratedDocument") ||
     text.includes("mongoose.Document<") ||
     text.includes("Document<") ||
     text.includes("Require_id") ||
@@ -308,19 +397,13 @@ function looksLikeMongooseDocument(type: Type): boolean {
     return true;
   }
 
-  const symbol = type.getSymbol() ?? type.getAliasSymbol();
-  const name = symbol?.getName();
-  if (
-    name === "HydratedDocument" ||
-    name === "Document" ||
-    name === "FlattenMaps"
-  ) {
-    return true;
-  }
-
-  // Intersection of FlattenMaps & Document & ... is the common expanded form
+  // Expanded Mongoose intersections may have nested Mongoose constituents.
   const parts = type.getIntersectionTypes();
-  if (parts.length > 1 && parts.some((p) => looksLikeMongooseDocument(p))) {
+
+  if (
+    parts.length > 1 &&
+    parts.some((part) => looksLikeMongooseDocument(part))
+  ) {
     return true;
   }
 
@@ -345,6 +428,16 @@ function shouldKeepProperty(
     return !propertyName.startsWith("$");
   }
   return declarations.some((d) => !isExternalDeclaration(d));
+}
+
+function isNominalMongooseType(type: Type, names: string[]): boolean {
+  const symbol = type.getSymbol() ?? type.getAliasSymbol();
+
+  if (!symbol || !names.includes(symbol.getName())) {
+    return false;
+  }
+
+  return (symbol.getDeclarations() ?? []).some(isMongooseDeclaration);
 }
 
 function isOptionalProperty(property: import("ts-morph").Symbol): boolean {
@@ -450,6 +543,13 @@ function normalizeMongooseDocument(type: Type, location: Node): string {
   return `{\n  ${fields.join(";\n  ")}\n}`;
 }
 
+function isMongooseDeclaration(node: Node): boolean {
+  const filePath = node.getSourceFile().getFilePath();
+
+  return filePath.includes(
+    `${path.sep}node_modules${path.sep}mongoose${path.sep}`,
+  );
+}
 /**
  * Recursively turn a TypeScript type into a serializable representation
  * suitable for ts-to-zod. Mongoose documents become plain object types;
@@ -477,8 +577,19 @@ function normalizeSerializableTypeInner(
     // Array / readonly array
     if (type.isArray()) {
       const element = type.getArrayElementType();
+
       if (element) {
-        return `${normalizeSerializableTypeInner(element, location, seen)}[]`;
+        const elementText = normalizeSerializableTypeInner(
+          element,
+          location,
+          seen,
+        );
+
+        const needsParens =
+          element.getUnionTypes().length > 1 ||
+          element.getIntersectionTypes().length > 1;
+
+        return `${needsParens ? `(${elementText})` : elementText}[]`;
       }
     }
 

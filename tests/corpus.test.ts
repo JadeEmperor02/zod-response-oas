@@ -124,21 +124,56 @@ describe("Controller corpus — extraction + generation, verified against real .
     ).toThrow(/silently produced no schema|failed schema generation/i);
   });
 
-  it("07-unions: named union alias throws clearly — same limitation", async () => {
+  it("07-unions: named union alias is expanded to a self-contained union", async () => {
     const { shapes, schemaOut } = await runFor("07-unions.ts");
-    expect(dataTypeTexts(shapes[0])).toEqual(["Result"]);
-    expect(dataTypeTexts(shapes[0])).not.toEqual(["undefined"]);
-    expect(() =>
-      generateZodSchemas(shapes, { outputPath: schemaOut, projectRoot }),
-    ).toThrow(/silently produced no schema|failed schema generation/i);
+
+    const texts = dataTypeTexts(shapes[0]);
+
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatch(/type: "user"/);
+    expect(texts[0]).toMatch(/type: "error"/);
+
+    const schemas = await generateAndImport(shapes, schemaOut);
+
+    const s = schemaOf(schemas, "unions");
+
+    expect(
+      s.safeParse({
+        type: "user",
+        userId: "abc",
+      }).success,
+    ).toBe(true);
+
+    expect(
+      s.safeParse({
+        type: "error",
+        reason: "boom",
+      }).success,
+    ).toBe(true);
   });
 
-  it("19-array-of-unions: array of named alias hits the same limitation", async () => {
+  it("19-array-of-unions: named union alias is expanded and preserved inside the array", async () => {
     const { shapes, schemaOut } = await runFor("19-array-of-unions.ts");
-    expect(dataTypeTexts(shapes[0])).toEqual(["Item[]"]);
-    expect(() =>
-      generateZodSchemas(shapes, { outputPath: schemaOut, projectRoot }),
-    ).toThrow(/silently produced no schema|failed schema generation/i);
+
+    const texts = dataTypeTexts(shapes[0]);
+
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain('kind: "a"');
+    expect(texts[0]).toContain('kind: "b"');
+    expect(texts[0]).toMatch(/^\(.+\)\[\]$/);
+
+    const schemas = await generateAndImport(shapes, schemaOut);
+
+    const s = schemaOf(schemas, "arrayOfUnions");
+
+    expect(
+      s.safeParse([
+        { kind: "a", a: 1 },
+        { kind: "b", b: "hello" },
+      ]).success,
+    ).toBe(true);
+
+    expect(s.safeParse([{ kind: "a", b: "wrong" }]).success).toBe(false);
   });
 
   it("22-intersection: intersection of named aliases hits the same limitation", async () => {
@@ -315,6 +350,13 @@ describe("Controller corpus — extraction + generation, verified against real .
     const s = schemaOf(schemas, "emptyObject");
     expect(s.safeParse({}).success).toBe(true);
     expect(s.safeParse("nope").success).toBe(false);
+  });
+
+  it("29-empty-success: call with no data results in kind: response", async () => {
+    const { shapes, schemaOut } = await runFor("29-empty-success.ts");
+    const schemas = await generateAndImport(shapes, schemaOut);
+    expect(schemas.emptySuccess.schema).toBeNull();
+    expect(schemas.emptySuccess.kind).toBe("response");
   });
 
   it("28-promise-unwrapped: awaited resolved type, not Promise wrapper", async () => {
