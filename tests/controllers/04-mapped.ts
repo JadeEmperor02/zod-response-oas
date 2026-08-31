@@ -3,9 +3,8 @@
  * EXPECT: extract { id: string; name: string }[]  (or Array<{ id: string; name: string }>)
  * SHOULD: succeed if ts-morph can follow the map callback return type
  * RISK: may degrade depending on getUsers() return type
- */
-import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+ */ import type { Request, Response } from "express";
+import { sendSuccess } from "../../src/response.js";
 
 function getUsers(): Array<{
   id: string;

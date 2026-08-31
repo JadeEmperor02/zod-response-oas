@@ -6,9 +6,8 @@
  * Note: we approximate the type name string the extractor looks for.
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
-// Minimal stand-in so the type text contains "HydratedDocument"
 interface HydratedDocument<T> {
   _id: string;
   __v: number;

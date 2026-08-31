@@ -5,7 +5,7 @@
  * SHOULD: succeed (type of ternary is the union of both arms)
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function ternary(req: Request, res: Response) {
   const isAdmin = req.query.admin === "true";

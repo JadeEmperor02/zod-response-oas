@@ -3,8 +3,9 @@
  * EXPECT: extract narrow literals where possible, e.g. { status: "ok" }
  * SHOULD: succeed; prefer literal over widened string if type system preserves it
  */
+
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function asConstLiteral(req: Request, res: Response) {
   return sendSuccess(res, {

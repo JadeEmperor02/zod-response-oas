@@ -111,6 +111,24 @@ export function generateZodSchemas(
     schemaNameByHandler[shape.handler] = names;
   }
 
+  if (typeLines.length === 0) {
+    // Every shape passed in had zero confidently-extracted typeTexts (e.g.
+    // the only sendSuccess call in the file was a spread or a non-object
+    // argument, both already warned about during extraction). Shelling out
+    // to ts-to-zod on an empty input produces a confusing, unrelated
+    // "file not found" error from its own internal validation step —
+    // failing here first with a clear, specific message is strictly better
+    // developer experience for what is otherwise a legitimate, expected
+    // failure (uncertainty correctly propagating to a build failure).
+    rmSync(tmpDir, { recursive: true, force: true });
+    throw new Error(
+      `No confidently-extracted response shapes to convert for: ${shapes
+        .map((s) => s.handler)
+        .join(", ")}. Check the extraction warnings for these handlers — ` +
+        `each one's only sendSuccess call was something the extractor couldn't confidently understand.`,
+    );
+  }
+
   writeFileSync(inputPath, typeLines.join("\n\n") + "\n");
 
   try {
@@ -133,6 +151,40 @@ export function generateZodSchemas(
   }
 
   const generatedSchemaSource = readFileSync(outputPath, "utf-8");
+
+  // ts-to-zod can silently omit a schema for a type it can't resolve —
+  // confirmed via reproduction: a `data` value typed as a named alias/
+  // interface (e.g. `export type XShape = SomeExternalType;`) resolves to
+  // just that NAME in the extractor's output, but the isolated temp file we
+  // hand to ts-to-zod never includes SomeExternalType's own declaration
+  // (it only exists in the original controller file). ts-to-zod doesn't
+  // error in this case — it just emits nothing for that type, with no
+  // warning of its own. Without this check, the lookup map below would
+  // reference a const that was never generated, and the failure would only
+  // surface as a ReferenceError the moment a real server imports this file
+  // — the single worst place for this library's core promise to break
+  // silently. Every expected identifier is verified against what ts-to-zod
+  // ACTUALLY produced before it's ever referenced.
+  const missingSchemas: string[] = [];
+  for (const names of Object.values(schemaNameByHandler)) {
+    for (const name of names) {
+      const declaredPattern = new RegExp(`(?:export )?const ${name}\\s*=`);
+      if (!declaredPattern.test(generatedSchemaSource)) {
+        missingSchemas.push(name);
+      }
+    }
+  }
+
+  if (missingSchemas.length > 0) {
+    rmSync(tmpDir, { recursive: true, force: true });
+    throw new Error(
+      `ts-to-zod silently produced no schema for: ${missingSchemas.join(", ")}. ` +
+        `This typically happens when a handler's response "data" is typed as a named ` +
+        `interface/type alias that isn't self-contained in isolation (it references another ` +
+        `type declared elsewhere in your codebase that couldn't be included here). ` +
+        `Give this response an explicit hand-written "response:" schema instead of relying on inference.`,
+    );
+  }
 
   // Wrap any handler with more than one distinct shape in z.union — a
   // branching success path is real behavior to document, not something to

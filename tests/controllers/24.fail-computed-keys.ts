@@ -5,7 +5,7 @@
  * SHOULD: prefer warning / partial over confident wrong schema
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function failComputedKey(req: Request, res: Response) {
   const key = "dynamic";

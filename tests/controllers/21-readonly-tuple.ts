@@ -4,7 +4,7 @@
  * SHOULD: succeed or surface if ts-to-zod chokes on readonly/tuple
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function readonlyTuple(req: Request, res: Response) {
   const pair: readonly [string, number] = ["Jade", 30];

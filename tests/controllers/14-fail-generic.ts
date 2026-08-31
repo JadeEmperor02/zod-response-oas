@@ -4,7 +4,7 @@
  * SHOULD: fail loudly, not emit any / z.any()
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 function genericResult<T>(): T {
   return {} as T;

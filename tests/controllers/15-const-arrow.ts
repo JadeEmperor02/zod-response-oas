@@ -4,7 +4,7 @@
  * SHOULD: succeed; handler name = "constArrow"
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export const constArrow = (req: Request, res: Response) => {
   return sendSuccess(res, {

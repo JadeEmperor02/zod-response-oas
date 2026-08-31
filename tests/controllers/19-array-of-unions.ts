@@ -4,7 +4,7 @@
  * SHOULD: succeed
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 type Item = { kind: "a"; a: number } | { kind: "b"; b: string };
 

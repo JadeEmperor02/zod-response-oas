@@ -4,7 +4,7 @@
  * SHOULD: succeed if ts-to-zod supports index signatures; otherwise surface failure
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function recordIndex(req: Request, res: Response) {
   const scores: Record<string, number> = {

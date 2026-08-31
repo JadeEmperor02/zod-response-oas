@@ -10,33 +10,10 @@ import { zSuccessResponse, zErrorResponse } from "./response.js";
 
 extendZodWithOpenApi(z);
 
-// One registry per process. If you're building multiple independent APIs
-// in the same process, call `resetRegistry()` between them or instantiate
-// separate `OpenAPIRegistry` instances yourself and pass them in — most
-// users never need to.
 export const openApiRegistry = new OpenAPIRegistry();
 
-// Populated once via `useGeneratedResponseSchemas` at app startup. Route
-// registration looks a handler's schema up here by `handler.name` so a
-// route never has to write `response: responseSchemas.foo` by hand — the
-// generated map already has the same key the extractor derived statically.
 let generatedResponseSchemas: Record<string, z.ZodType> = {};
 
-/**
- * Wires the generated `responseSchemas` map (from your regenerated
- * response-schemas file) into automatic per-route lookup. Call this once
- * at startup, before registering routes.
- *
- * This relies on `Function.prototype.name`, which JS sets automatically
- * for `const foo = () => {}` / `export function foo() {}` — but NOT for an
- * anonymous function returned by a wrapper, e.g.
- * `wrapAsync(fn)` where `wrapAsync = (fn) => (req, res, next) => ...`.
- * If your handlers pass through such a wrapper before reaching
- * `createSmartRouter`, either make the wrapper preserve the original name
- * (`Object.defineProperty(wrapped, "name", { value: fn.name })`) or pass
- * `response:` explicitly on those routes — auto-injection will warn
- * rather than silently fall back to a permissive schema.
- */
 export function useGeneratedResponseSchemas(
   schemas: Record<string, z.ZodType>,
 ) {
@@ -46,16 +23,6 @@ export function useGeneratedResponseSchemas(
 const warnedMissingNames = new Set<string>();
 const warnedUnresolvedHandlers = new Set<string>();
 
-/**
- * A missing generated schema is only a *console warning* by default — that
- * protects a permissive z.any() fallback in dev, but a warning is easy to
- * miss in CI logs. requireGeneratedResponses=true turns the exact same
- * condition into a thrown error at route-registration time (i.e. at server
- * startup, before any request is served) instead. This is the difference
- * between "stale codegen quietly ships a wrong contract" and "stale codegen
- * fails the build" — the latter is what you want once the generate step is
- * wired into your actual build/predeploy pipeline.
- */
 function resolveGeneratedResponse(
   handler: RequestHandler,
   routeLabel: string,
@@ -85,18 +52,8 @@ function resolveGeneratedResponse(
       `re-run "zod-response-oas generate" if this handler is new, or pass "response:" explicitly.`;
 
     if (strict) {
-      // Unlike the warning path below, strict mode does NOT get the
-      // "only if a map was actually provided" exemption — an empty or
-      // never-registered map is exactly the failure strict mode exists to
-      // catch (e.g. requireGeneratedResponses enabled but codegen never
-      // ran, or useGeneratedResponseSchemas never called). Exempting that
-      // case would silently defeat strict mode for its most important
-      // scenario.
       throw new Error(`[zod-response-oas] ${message}`);
     }
-    // Only warn if a generated map was actually provided — if the consumer
-    // hasn't called useGeneratedResponseSchemas at all yet, every route
-    // would warn, which is noise during initial setup rather than signal.
     if (
       Object.keys(generatedResponseSchemas).length > 0 &&
       !warnedUnresolvedHandlers.has(routeLabel)
@@ -180,15 +137,7 @@ export interface RouteConfig {
   params?: z.ZodObject<any>;
   middleware?: RequestHandler[];
   handler: RequestHandler;
-  /** Set to true if this route requires the security schemes registered via `registerSecurityScheme`. */
   secure?: boolean;
-  /**
-   * Explicit response schema. Optional — if omitted, the router looks up
-   * `handler.name` in the map passed to `useGeneratedResponseSchemas` and
-   * uses that automatically. Pass this explicitly to override the
-   * generated schema, or when the handler's name can't be relied on (see
-   * `useGeneratedResponseSchemas`).
-   */
   response?: z.ZodType;
   autoParamSchemas?: AutoParamStrategyMap;
 }
@@ -196,15 +145,7 @@ export interface RouteConfig {
 export interface SmartRouterOptions {
   basePath: string;
   tag: string;
-  /** Names of security schemes (already registered via `registerSecurityScheme`) required on `secure: true` routes. Defaults to none. */
   secureWith?: string[];
-  /**
-   * When true, a route with no explicit `response:` whose generated schema
-   * can't be resolved throws at registration time (server startup) instead
-   * of warning and falling back to a permissive schema. Turns "codegen
-   * wasn't re-run" into a build failure instead of a silently stale
-   * OpenAPI contract. Recommended once `generate` is wired into your build.
-   */
   requireGeneratedResponses?: boolean;
   autoParamSchemas?: AutoParamStrategyMap;
 }
@@ -225,13 +166,17 @@ export function inferParamsSchema(
     Object.fromEntries(
       params.map((name) => {
         let matchedStrategy = strategies[name];
+        const looksLikeId = name.toLowerCase().endsWith("id");
 
-        if (
-          !matchedStrategy &&
-          name.toLowerCase().endsWith("id") &&
-          strategies["id"]
-        ) {
-          matchedStrategy = strategies["id"];
+        if (!matchedStrategy && looksLikeId) {
+          // "mongo" is the built-in default for any *id-suffixed param —
+          // this library originated in a Mongoose-heavy codebase, and that
+          // remains the most common case for its actual audience. A
+          // consumer whose IDs are UUIDs (or anything else) overrides this
+          // GLOBALLY with autoParamSchemas: { id: "uuid" } — that already
+          // takes precedence here; "mongo" is only the fallback when no
+          // such override was configured.
+          matchedStrategy = strategies["id"] ?? "mongo";
         }
 
         if (!matchedStrategy && strategies["*"]) {
@@ -264,11 +209,6 @@ export interface SecuritySchemeInput {
       };
 }
 
-/**
- * Register a security scheme (JWT bearer, cookie, API key, etc.) with the
- * shared OpenAPI registry. Call this once at startup for each scheme your
- * API uses, then reference its `name` in `SmartRouterOptions.secureWith`.
- */
 export function registerSecurityScheme(input: SecuritySchemeInput) {
   const { name, scheme } = input;
   openApiRegistry.registerComponent("securitySchemes", name, scheme as any);
@@ -286,7 +226,6 @@ export function createSmartRouter(options: SmartRouterOptions) {
     const fullPath = `${options.basePath}${path}`.replace(/\/+/g, "/");
     const openApiPath = fullPath.replace(/:([a-zA-Z0-9_]+)/g, "{$1}");
 
-    // Merge router-wide strategies with route-level overrides
     const mergedStrategies: AutoParamStrategyMap = {
       ...options.autoParamSchemas,
       ...config.autoParamSchemas,

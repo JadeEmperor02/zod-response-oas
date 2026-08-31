@@ -4,7 +4,7 @@
  * SHOULD: fail loudly
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 function buildResponse() {
   return { data: { id: "1" }, message: "built" };

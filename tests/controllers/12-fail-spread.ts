@@ -4,7 +4,7 @@
  * SHOULD: fail loudly (continue / skip shape), never guess
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 const responseOptions = {
   data: { id: "1", name: "Jade" },

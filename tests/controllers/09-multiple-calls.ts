@@ -5,7 +5,7 @@
  * SHOULD: succeed; both shapes retained, not collapsed
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function multipleCalls(req: Request, res: Response) {
   if (req.query.pending) {

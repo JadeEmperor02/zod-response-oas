@@ -4,7 +4,7 @@
  * SHOULD: succeed with data shape { count: number }
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 export function messageAndOthers(req: Request, res: Response) {
   return sendSuccess(res, {

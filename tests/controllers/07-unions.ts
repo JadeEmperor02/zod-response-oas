@@ -4,7 +4,7 @@
  * SHOULD: succeed (ts-to-zod supports unions)
  */
 import type { Request, Response } from "express";
-import { sendSuccess } from "../index.js";
+import { sendSuccess } from "../../src/response.js";
 
 type Result =
   | { type: "user"; userId: string }
