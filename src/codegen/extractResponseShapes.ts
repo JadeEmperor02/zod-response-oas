@@ -1,4 +1,20 @@
-import { Project, SyntaxKind, Node, CallExpression } from "ts-morph";
+/**
+ * Walks controller source via ts-morph and records each sendSuccess call as a
+ * typed variant so mixed branches (data vs message-only) are not collapsed.
+ *
+ * Mongoose document types are normalized to plain serializable object shapes
+ * before type text is emitted — ts-to-zod never sees FlattenMaps / Document /
+ * HydratedDocument machinery.
+ */
+
+import {
+  Project,
+  SyntaxKind,
+  Node,
+  CallExpression,
+  Type,
+  SymbolFlags,
+} from "ts-morph";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
 
@@ -114,9 +130,7 @@ export function extractResponseShapes(
           warnings,
         );
 
-        // No data / others / message → confirmed empty success
         if (!dataProp && othersTypeTexts.length === 0 && !hasMessage) {
-          // othersProp present but unparseable → already warned; don't mark empty
           if (othersProp && othersTypeTexts.length === 0) {
             continue;
           }
@@ -124,7 +138,6 @@ export function extractResponseShapes(
           continue;
         }
 
-        // Message and/or others, no data → response-level variant
         if (!dataProp) {
           variants.push({
             kind: "response",
@@ -134,14 +147,12 @@ export function extractResponseShapes(
           continue;
         }
 
-        // Data present → data variant (may also carry message/others on the same call)
         const dataTypeText = extractDataTypeText(
           dataProp,
           call.getStartLineNumber(),
           warnings,
         );
         if (dataTypeText === null) {
-          // warned / skipped (e.g. raw mongoose.Document)
           continue;
         }
 
@@ -153,8 +164,6 @@ export function extractResponseShapes(
         });
       }
 
-      // Always record the handler if we saw sendSuccess — including empty /
-      // message-only — so generate can emit { schema: null } or response kinds.
       if (variants.length > 0 || warnings.length > 0) {
         results.push({
           handler: name,
@@ -170,7 +179,6 @@ export function extractResponseShapes(
   return results;
 }
 
-/** Unwrap `as const` / satisfies / parentheses so the object literal is visible. */
 function unwrapToExpression(node: Node): Node {
   let cur = node;
   while (
@@ -184,10 +192,6 @@ function unwrapToExpression(node: Node): Node {
   return cur;
 }
 
-/**
- * Pull `others: { a: 1, b: "x" }` into property lines for envelope synthesis:
- * ["a: number", "b: string"]
- */
 function extractOthersFields(
   othersProp: Node | undefined,
   line: number,
@@ -242,8 +246,9 @@ function extractOthersFields(
 }
 
 /**
- * Resolve the TypeScript type text of `data`, or null if this call should be
- * skipped (with a warning already recorded).
+ * Resolve the TypeScript type text of `data`, normalizing Mongoose document
+ * types into plain serializable object shapes. Returns null only when the
+ * call should be skipped (with a warning already recorded).
  */
 function extractDataTypeText(
   dataProp: Node,
@@ -268,39 +273,253 @@ function extractDataTypeText(
     return null;
   }
 
-  // Object literals can contain computed keys whose runtime names cannot
-  // be resolved confidently. Preserve the known literal properties and
-  // ignore the computed ones rather than allowing TypeScript to widen the
-  // entire shape into an index signature.
   if (Node.isObjectLiteralExpression(dataInitializer)) {
     return extractObjectLiteralType(dataInitializer);
   }
 
   const dataType = dataInitializer.getType();
-  let typeText = dataType.getText(dataInitializer);
+  return normalizeSerializableType(dataType, dataInitializer);
+}
 
-  const symbol = dataType.getSymbol();
-  const typeName = symbol?.getName();
+// ---------------------------------------------------------------------------
+// Mongoose / serializable-type normalization
+// ---------------------------------------------------------------------------
 
-  if (typeName === "HydratedDocument") {
-    const typeArgs = dataType.getTypeArguments();
-    if (typeArgs.length > 0) {
-      typeText = typeArgs[0].getText(dataInitializer);
-    }
-  } else if (typeText.includes("HydratedDocument")) {
-    warnings.push(
-      `line ${line} — "data" looks like a raw Mongoose document (no .toObject()/.toJSON()); generated schema may leak internal fields`,
-    );
-  } else if (typeText.includes("mongoose.Document<")) {
-    warnings.push(
-      `line ${line} — "data" is a raw Mongoose document (not normalized via .toObject()/.lean()); ` +
-        `its expanded type includes internal Document fields/methods that can't be confidently converted. ` +
-        `Call .toObject() or .lean() on the query before sendSuccess, or pass "response:" explicitly for this route.`,
-    );
-    return null;
+function isExternalDeclaration(node: Node): boolean {
+  const filePath = node.getSourceFile().getFilePath();
+  return filePath.includes(`${path.sep}node_modules${path.sep}`);
+}
+
+/**
+ * Heuristic detector only — used to decide when to run property-based
+ * extraction. Stripping still keys off declaration origin, not this list.
+ */
+function looksLikeMongooseDocument(type: Type): boolean {
+  const text = type.getText();
+  if (
+    text.includes("FlattenMaps") ||
+    text.includes("HydratedDocument") ||
+    text.includes("mongoose.Document<") ||
+    text.includes("Document<") ||
+    text.includes("Require_id") ||
+    text.includes("Default__v") ||
+    text.includes("BufferToJSON")
+  ) {
+    return true;
   }
 
-  return typeText;
+  const symbol = type.getSymbol() ?? type.getAliasSymbol();
+  const name = symbol?.getName();
+  if (
+    name === "HydratedDocument" ||
+    name === "Document" ||
+    name === "FlattenMaps"
+  ) {
+    return true;
+  }
+
+  // Intersection of FlattenMaps & Document & ... is the common expanded form
+  const parts = type.getIntersectionTypes();
+  if (parts.length > 1 && parts.some((p) => looksLikeMongooseDocument(p))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Prefer keeping a property when at least one declaration is from the
+ * consumer project. Always keep `_id` / `__v` (serialized document fields)
+ * even when declared only inside mongoose.
+ */
+function shouldKeepProperty(
+  propertyName: string,
+  declarations: Node[],
+): boolean {
+  if (propertyName === "_id" || propertyName === "__v") {
+    return true;
+  }
+  if (declarations.length === 0) {
+    // No declaration info — keep only if it doesn't look like an internal
+    // Mongoose runtime key ($__, $isNew, methods often have no useful decls)
+    return !propertyName.startsWith("$");
+  }
+  return declarations.some((d) => !isExternalDeclaration(d));
+}
+
+function isOptionalProperty(property: import("ts-morph").Symbol): boolean {
+  // Optional if any declaration is a PropertySignature/PropertyDeclaration
+  // with a question token, or the symbol has Optional flag.
+  try {
+    if (property.hasFlags?.(SymbolFlags.Optional)) {
+      return true;
+    }
+  } catch {
+    // older ts-morph — fall through
+  }
+  for (const decl of property.getDeclarations()) {
+    if (
+      Node.isPropertySignature(decl) ||
+      Node.isPropertyDeclaration(decl) ||
+      Node.isParameterDeclaration(decl)
+    ) {
+      if (decl.hasQuestionToken?.()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Build a plain `{ field: type; ... }` from a (possibly Mongoose) object type
+ * by keeping project-owned properties (+ _id / __v).
+ */
+function normalizeMongooseDocument(type: Type, location: Node): string {
+  // Nominal HydratedDocument<T> — prefer T when available
+  const symbol = type.getSymbol() ?? type.getAliasSymbol();
+  if (symbol?.getName() === "HydratedDocument") {
+    const typeArgs = type.getTypeArguments();
+    if (typeArgs.length > 0) {
+      return normalizeSerializableType(typeArgs[0], location);
+    }
+  }
+
+  const fields: string[] = [];
+  const seen = new Set<string>();
+
+  for (const property of type.getProperties()) {
+    const name = property.getName();
+    if (seen.has(name)) continue;
+
+    // Skip obvious callable methods / symbols that are never JSON fields
+    if (name === "constructor" || name.startsWith("$$")) continue;
+
+    const declarations = property.getDeclarations();
+    if (!shouldKeepProperty(name, declarations)) {
+      continue;
+    }
+
+    // Methods: if every project declaration is a method, skip (not JSON)
+    const projectDecls = declarations.filter((d) => !isExternalDeclaration(d));
+    if (
+      projectDecls.length > 0 &&
+      projectDecls.every(
+        (d) =>
+          Node.isMethodSignature(d) ||
+          Node.isMethodDeclaration(d) ||
+          Node.isFunctionTypeNode(d),
+      )
+    ) {
+      continue;
+    }
+
+    let propertyType: Type;
+    try {
+      propertyType = property.getTypeAtLocation(location);
+    } catch {
+      continue;
+    }
+
+    // Skip pure function types (Document methods that leaked through)
+    if (
+      propertyType.getCallSignatures().length > 0 &&
+      !propertyType.isObject()
+    ) {
+      continue;
+    }
+    if (
+      propertyType.getCallSignatures().length > 0 &&
+      propertyType.getProperties().length === 0
+    ) {
+      continue;
+    }
+
+    const nested = normalizeSerializableType(propertyType, location);
+    const optional = isOptionalProperty(property);
+    fields.push(`${name}${optional ? "?" : ""}: ${nested}`);
+    seen.add(name);
+  }
+
+  if (fields.length === 0) {
+    // Fallback: cannot build a useful plain shape — emit original text so
+    // generation fails loudly rather than inventing z.any().
+    return type.getText(location);
+  }
+
+  return `{\n  ${fields.join(";\n  ")}\n}`;
+}
+
+/**
+ * Recursively turn a TypeScript type into a serializable representation
+ * suitable for ts-to-zod. Mongoose documents become plain object types;
+ * arrays/unions recurse; everything else keeps getText().
+ */
+function normalizeSerializableType(type: Type, location: Node): string {
+  // Avoid infinite recursion on pathological self-references
+  return normalizeSerializableTypeInner(type, location, new Set());
+}
+
+function normalizeSerializableTypeInner(
+  type: Type,
+  location: Node,
+  seen: Set<Type>,
+): string {
+  // Stack-based cycle guard: same Type may appear on independent sibling
+  // properties and must still be normalized. Only bail when this type is
+  // already on the *current* recursion path (a true cycle).
+  if (seen.has(type)) {
+    return type.getText(location);
+  }
+
+  seen.add(type);
+  try {
+    // Array / readonly array
+    if (type.isArray()) {
+      const element = type.getArrayElementType();
+      if (element) {
+        return `${normalizeSerializableTypeInner(element, location, seen)}[]`;
+      }
+    }
+
+    // Tuple
+    if (type.isTuple()) {
+      const elements = type.getTupleElements();
+      const parts = elements.map((el) =>
+        normalizeSerializableTypeInner(el, location, seen),
+      );
+      return `[${parts.join(", ")}]`;
+    }
+
+    // Union — normalize each branch
+    const unionParts = type.getUnionTypes();
+    if (unionParts.length > 1) {
+      return unionParts
+        .map((p) => normalizeSerializableTypeInner(p, location, seen))
+        .join(" | ");
+    }
+
+    // Intersection — if Mongoose-shaped, collapse via property extraction;
+    // otherwise join normalized constituents.
+    const intersectionParts = type.getIntersectionTypes();
+    if (intersectionParts.length > 1) {
+      if (looksLikeMongooseDocument(type)) {
+        return normalizeMongooseDocument(type, location);
+      }
+      return intersectionParts
+        .map((p) => normalizeSerializableTypeInner(p, location, seen))
+        .join(" & ");
+    }
+
+    if (looksLikeMongooseDocument(type)) {
+      return normalizeMongooseDocument(type, location);
+    }
+
+    // Ordinary type — keep as-is (named aliases, primitives, object literals, …)
+    return type.getText(location);
+  } finally {
+    seen.delete(type);
+  }
 }
 
 function extractObjectLiteralType(object: Node): string {

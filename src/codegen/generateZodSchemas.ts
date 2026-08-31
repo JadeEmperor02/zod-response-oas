@@ -266,6 +266,12 @@ export function generateZodSchemas(
   return { fileContent, schemaNameByHandler };
 }
 
+function stripZodImport(source: string): string {
+  return source
+    .replace(/^\s*import\s*\{\s*z\s*\}\s*from\s*["']zod["'];?\s*$/gm, "")
+    .trim();
+}
+
 /**
  * One set of type strings → one temp dir → one ts-to-zod invocation.
  * Does not take ExtractedShape — only the type texts to convert.
@@ -312,6 +318,28 @@ function convertTypeTexts(
 
     const generatedSchemaSource = readFileSync(outputPath, "utf-8");
 
+    console.log("INPUT:\n", typeLines.join("\n\n"));
+    console.log("OUTPUT:\n", generatedSchemaSource);
+
+    const unsupportedRuntimeRefs = [
+      "mongoose.",
+      "HydratedDocument",
+      "mongoose.Document",
+    ];
+
+    const badRef = unsupportedRuntimeRefs.find((ref) =>
+      generatedSchemaSource.includes(ref),
+    );
+
+    if (badRef) {
+      throw new Error(
+        `ts-to-zod generated an unresolved runtime reference "${badRef}" ` +
+          `for ${safeHandlerName}. This type depends on a library-specific ` +
+          `TypeScript helper that cannot be represented safely in isolation. ` +
+          `Normalize the response value (.toObject(), .lean(), etc.) or pass "response:" explicitly.`,
+      );
+    }
+
     const missing = names.filter(
       (name) =>
         !new RegExp(`(?:export )?const ${name}\\s*=`).test(
@@ -328,7 +356,7 @@ function convertTypeTexts(
 
     return {
       names,
-      schemaSource: generatedSchemaSource.trim(),
+      schemaSource: stripZodImport(generatedSchemaSource),
     };
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });

@@ -107,6 +107,7 @@ export function deleteUser(req: any, res: any) {
   return sendSuccess(res, { message: "deleted" });
 }
 `);
+
     expect(shapes).toHaveLength(1);
     expect(shapes[0].warnings).toHaveLength(0);
     expect(shapes[0].variants).toHaveLength(1);
