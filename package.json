@@ -10,7 +10,9 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "README.md",
+    "LICENCE"
   ],
   "scripts": {
     "build": "tsc --pretty",
