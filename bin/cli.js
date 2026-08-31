@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { extractResponseShapes } from "../dist/codegen/extractResponseShapes.js";
-import { generateZodSchemas } from "../dist/codegen/generateZodSchemas.js";
+import {
+  generateZodSchemas,
+  ensureParentDirectory,
+} from "../dist/codegen/generateZodSchemas.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -22,6 +25,7 @@ if (command === "generate") {
   const projectRoot = getFlag("project-root", process.cwd());
   const skipValidation = args.includes("--skip-validation");
 
+  ensureParentDirectory(shapesOutputPath);
   const results = extractResponseShapes({
     tsconfigPath,
     controllerGlobs,

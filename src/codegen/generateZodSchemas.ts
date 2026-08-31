@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type {
@@ -8,6 +14,10 @@ import type {
 } from "./extractResponseShapes.js";
 
 const require = createRequire(import.meta.url);
+
+export function ensureParentDirectory(filePath: string) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+}
 
 function resolveTsToZodBin(): string {
   const pkgJsonPath = require.resolve("ts-to-zod/package.json");
@@ -239,6 +249,7 @@ export function generateZodSchemas(
     "",
   ].join("\n");
 
+  ensureParentDirectory(options.outputPath);
   writeFileSync(options.outputPath, fileContent);
 
   if (failures.length > 0) {
