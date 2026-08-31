@@ -15,7 +15,7 @@ beforeEach(() => {
 describe("response resolution", () => {
   it("explicit response: wins even when a generated schema with the same handler name exists", () => {
     const generatedSchema = z.object({ fromGenerated: z.literal(true) });
-    useGeneratedResponseSchemas({ getThing: generatedSchema });
+    useGeneratedResponseSchemas({ getThing: { schema: generatedSchema, kind: 'data' } });
 
     const explicitSchema = z.object({ fromExplicit: z.literal(true) });
     function getThing(req: any, res: any) {}
@@ -38,7 +38,7 @@ describe("response resolution", () => {
 
   it("resolves the generated schema by handler.name when no explicit response is given", () => {
     const generatedSchema = z.object({ resolvedViaName: z.literal(true) });
-    useGeneratedResponseSchemas({ getThing: generatedSchema });
+    useGeneratedResponseSchemas({ getThing: { schema: generatedSchema, kind: 'data' } });
 
     function getThing(req: any, res: any) {}
 
@@ -59,7 +59,7 @@ describe("response resolution", () => {
 
   it("non-strict: an unresolvable handler name warns and falls back to a permissive schema, without throwing", () => {
     useGeneratedResponseSchemas({
-      someOtherHandler: z.object({ x: z.string() }),
+      someOtherHandler: { schema: z.object({ x: z.string() }), kind: 'data' },
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -80,7 +80,7 @@ describe("response resolution", () => {
 
   it("strict: an unresolvable handler name throws at registration time instead of warning", () => {
     useGeneratedResponseSchemas({
-      someOtherHandler: z.object({ x: z.string() }),
+      someOtherHandler: { schema: z.object({ x: z.string() }), kind: 'data' },
     });
 
     function unknownHandler(req: any, res: any) {}
@@ -151,7 +151,7 @@ describe("response resolution", () => {
 
   it("a wrapper that preserves the original function's name DOES resolve correctly", () => {
     const generatedSchema = z.object({ preserved: z.literal(true) });
-    useGeneratedResponseSchemas({ getThing: generatedSchema });
+    useGeneratedResponseSchemas({ getThing: { schema: generatedSchema, kind: 'data' } });
 
     function getThing(req: any, res: any) {}
     const wrapAsync = (fn: any) => {

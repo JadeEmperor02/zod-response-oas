@@ -12,10 +12,15 @@ extendZodWithOpenApi(z);
 
 export const openApiRegistry = new OpenAPIRegistry();
 
-let generatedResponseSchemas: Record<string, z.ZodType> = {};
+export interface GeneratedResponseSchemaEntry {
+  schema: z.ZodType | null;
+  kind: "data" | "response";
+}
+
+let generatedResponseSchemas: Record<string, GeneratedResponseSchemaEntry> = {};
 
 export function useGeneratedResponseSchemas(
-  schemas: Record<string, z.ZodType>,
+  schemas: Record<string, GeneratedResponseSchemaEntry>,
 ) {
   generatedResponseSchemas = schemas;
 }
@@ -27,7 +32,7 @@ function resolveGeneratedResponse(
   handler: RequestHandler,
   routeLabel: string,
   strict: boolean,
-): z.ZodType | undefined {
+): GeneratedResponseSchemaEntry | null | undefined {
   const name = handler.name;
 
   if (!name) {
@@ -38,15 +43,19 @@ function resolveGeneratedResponse(
     if (strict) {
       throw new Error(`[zod-response-oas] ${message}`);
     }
+
     if (!warnedMissingNames.has(routeLabel)) {
       warnedMissingNames.add(routeLabel);
       console.warn(`[zod-response-oas] ${message}`);
     }
+
     return undefined;
   }
 
-  const schema = generatedResponseSchemas[name];
-  if (!schema) {
+  // IMPORTANT:
+  // `null` means the handler was successfully inferred and has no data.
+  // `undefined` means there is no generated entry for this handler.
+  if (!(name in generatedResponseSchemas)) {
     const message =
       `${routeLabel}: no generated schema found for handler "${name}" — ` +
       `re-run "zod-response-oas generate" if this handler is new, or pass "response:" explicitly.`;
@@ -54,6 +63,7 @@ function resolveGeneratedResponse(
     if (strict) {
       throw new Error(`[zod-response-oas] ${message}`);
     }
+
     if (
       Object.keys(generatedResponseSchemas).length > 0 &&
       !warnedUnresolvedHandlers.has(routeLabel)
@@ -63,9 +73,11 @@ function resolveGeneratedResponse(
         `[zod-response-oas] ${message} Falling back to a permissive response schema.`,
       );
     }
+
+    return undefined;
   }
 
-  return schema;
+  return generatedResponseSchemas[name];
 }
 
 export type ParamStrategy =
@@ -278,14 +290,22 @@ export function createSmartRouter(options: SmartRouterOptions) {
     };
 
     const successStatusCode = method === "post" ? 201 : 200;
-    const resolvedResponse =
-      config.response ??
-      resolveGeneratedResponse(
-        config.handler,
-        fullPath,
-        options.requireGeneratedResponses ?? false,
-      );
-    const successSchema = zSuccessResponse(resolvedResponse);
+    const resolvedEntry = config.response
+      ? ({ schema: config.response, kind: "data" } as GeneratedResponseSchemaEntry)
+      : resolveGeneratedResponse(
+          config.handler,
+          fullPath,
+          options.requireGeneratedResponses ?? false,
+        );
+
+    const successSchema =
+      resolvedEntry === null
+        ? zSuccessResponse()
+        : resolvedEntry === undefined
+          ? z.any()
+          : (resolvedEntry.kind === "response"
+              ? (resolvedEntry.schema as z.ZodType)
+              : zSuccessResponse(resolvedEntry.schema as z.ZodType));
 
     openApiRegistry.registerPath({
       method,

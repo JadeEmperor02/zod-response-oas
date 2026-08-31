@@ -59,7 +59,7 @@ export function zSuccessResponse<T extends z.ZodType>(
     success: z.literal(true),
     ok: z.literal(true),
     message: z.string().optional(),
-    data: dataSchema || z.any(),
+    ...(dataSchema ? { data: dataSchema } : {}),
     ...explicitOthers,
   });
   return baseSchema.catchall(z.any());
