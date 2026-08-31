@@ -126,6 +126,26 @@ export function extractResponseShapes(
           warnings.push(
             `line ${call.getStartLineNumber()} — "data" looks like a raw Mongoose document (no .toObject()/.toJSON()); generated schema may leak internal fields`,
           );
+        } else if (typeText.includes("mongoose.Document<")) {
+          // Real Mongoose query results at a call site are usually NOT the
+          // nominal `HydratedDocument<T>` interface reference the checks
+          // above expect — they're the fully expanded structural form
+          // TypeScript prints for it: an intersection like
+          // `mongoose.Document<...> & IProperty & Required<{_id}> & {__v}`.
+          // There's no single clean "T" to unwrap to here (unlike a real
+          // HydratedDocument<T> reference), and handing this ~100-property
+          // monster — full of internal methods, $locals, ObjectId, etc. —
+          // to ts-to-zod produces a wall of "not supported" warnings and,
+          // on at least some environments, a hard crash in its own
+          // validation step. Refusing to guess and naming the fix (call
+          // .toObject()/.lean() before sendSuccess) is far more useful
+          // than either a crash or a mostly-z.any() schema would be.
+          warnings.push(
+            `line ${call.getStartLineNumber()} — "data" is a raw Mongoose document (not normalized via .toObject()/.lean()); ` +
+              `its expanded type includes internal Document fields/methods that can't be confidently converted. ` +
+              `Call .toObject() or .lean() on the query before sendSuccess, or pass "response:" explicitly for this route.`,
+          );
+          continue;
         }
 
         typeTexts.add(typeText);
