@@ -256,6 +256,26 @@ function extractOthersFields(
  * types into plain serializable object shapes. Returns null only when the
  * call should be skipped (with a warning already recorded).
  */
+
+function scrubLibraryTypeText(typeText: string): string {
+  return (
+    typeText
+      // ObjectId — JSON is a string
+      .replace(/import\("mongoose"\)\.Types\.ObjectId/g, "string")
+      .replace(/mongoose\.Types\.ObjectId/g, "string")
+      .replace(/\bTypes\.ObjectId\b/g, "string")
+      .replace(/import\("bson"\)\.ObjectId/g, "string")
+      // other common leaks
+      .replace(/import\("mongoose"\)\.Types\.Decimal128/g, "string")
+      .replace(/mongoose\.Types\.Decimal128/g, "string")
+      .replace(/import\("mongoose"\)\.Types\.Buffer/g, "string")
+      .replace(/mongoose\.Types\.Buffer/g, "string")
+      // belt-and-suspenders: any leftover namespace ref
+      .replace(/import\("mongoose"\)\.[A-Za-z0-9_.]+/g, "unknown")
+      .replace(/mongoose\.[A-Za-z0-9_.]+/g, "unknown")
+  );
+}
+
 function extractDataTypeText(
   dataProp: Node,
   line: number,
@@ -546,7 +566,7 @@ function normalizeMongooseDocument(type: Type, location: Node): string {
   if (fields.length === 0) {
     // Fallback: cannot build a useful plain shape — emit original text so
     // generation fails loudly rather than inventing z.any().
-    return type.getText(location);
+    return scrubLibraryTypeText(type.getText(location));
   }
 
   return `{\n  ${fields.join(";\n  ")}\n}`;
@@ -566,7 +586,9 @@ function isMongooseDeclaration(node: Node): boolean {
  */
 function normalizeSerializableType(type: Type, location: Node): string {
   // Avoid infinite recursion on pathological self-references
-  return normalizeSerializableTypeInner(type, location, new Set());
+  return scrubLibraryTypeText(
+    normalizeSerializableTypeInner(type, location, new Set()),
+  );
 }
 
 function normalizeSerializableTypeInner(
