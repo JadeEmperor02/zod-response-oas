@@ -224,12 +224,18 @@ function extractOthersFields(
       const initializer = property.getInitializer();
       if (!initializer) continue;
       const propertyName = property.getName();
-      const propertyType = initializer.getType().getText(initializer);
+      const propertyType = normalizeSerializableType(
+        initializer.getType(),
+        initializer,
+      );
       fields.push(`${propertyName}: ${propertyType}`);
     } else if (Node.isShorthandPropertyAssignment(property)) {
       const nameNode = property.getNameNode();
       const propertyName = property.getName();
-      const propertyType = nameNode.getType().getText(nameNode);
+      const propertyType = normalizeSerializableType(
+        nameNode.getType(),
+        nameNode,
+      );
       fields.push(`${propertyName}: ${propertyType}`);
     } else if (Node.isSpreadAssignment(property)) {
       warnings.push(
@@ -471,7 +477,10 @@ function isOptionalProperty(property: import("ts-morph").Symbol): boolean {
 function normalizeMongooseDocument(type: Type, location: Node): string {
   // Nominal HydratedDocument<T> — prefer T when available
   const symbol = type.getSymbol() ?? type.getAliasSymbol();
-  if (symbol?.getName() === "HydratedDocument") {
+  const name = symbol?.getName();
+
+  // lean() → FlattenMaps<T>; hydrated → HydratedDocument<T>
+  if (name === "HydratedDocument" || name === "FlattenMaps") {
     const typeArgs = type.getTypeArguments();
     if (typeArgs.length > 0) {
       return normalizeSerializableType(typeArgs[0], location);
@@ -653,17 +662,17 @@ function extractObjectLiteralType(object: Node): string {
       if (!initializer) continue;
 
       fields.push(
-        `${property.getName()}: ${property.getType().getText(property)}`,
+        `${property.getName()}: ${normalizeSerializableType(property.getType(), property)}`,
       );
       continue;
     }
 
     if (Node.isShorthandPropertyAssignment(property)) {
       fields.push(
-        `${property.getName()}: ${property
-          .getNameNode()
-          .getType()
-          .getText(property.getNameNode())}`,
+        `${property.getName()}: ${normalizeSerializableType(
+          property.getNameNode().getType(),
+          property.getNameNode(),
+        )}`,
       );
     }
   }
