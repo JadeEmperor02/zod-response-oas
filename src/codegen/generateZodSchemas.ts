@@ -245,7 +245,7 @@ export function generateZodSchemas(
     "",
     "export const responseSchemas = {",
     ...lookupEntries,
-    "};",
+    '} satisfies Record<string, { schema: z.ZodType | null; kind: "data" | "response" }>;',
     "",
   ].join("\n");
 
@@ -294,14 +294,15 @@ function convertTypeTexts(
   const inputPath = path.join(tmpDir, inputFile);
   const outputPath = path.join(tmpDir, outputFile);
 
-  const names: string[] = [];
+  const typeNames: string[] = [];
   const typeLines: string[] = [];
 
   typeTexts.forEach((typeText, i) => {
     const suffix = typeTexts.length > 1 ? String(i) : "";
     const typeName = `${capitalize(safeHandlerName)}Shape${suffix}`;
+
     typeLines.push(`export type ${typeName} = ${typeText};`);
-    names.push(`${lowerFirst(typeName)}Schema`);
+    typeNames.push(typeName);
   });
 
   writeFileSync(inputPath, typeLines.join("\n\n") + "\n");
@@ -317,6 +318,21 @@ function convertTypeTexts(
     });
 
     const generatedSchemaSource = readFileSync(outputPath, "utf-8");
+
+    const generatedNames = [
+      ...generatedSchemaSource.matchAll(
+        /export const ([A-Za-z_$][A-Za-z0-9_$]*Schema)\s*=/g,
+      ),
+    ].map((match) => match[1]);
+
+    if (generatedNames.length !== typeNames.length) {
+      throw new Error(
+        `ts-to-zod generated ${generatedNames.length} schema(s) for ` +
+          `${typeNames.length} type(s): ${typeNames.join(", ")}`,
+      );
+    }
+
+    const names = generatedNames;
 
     console.log("INPUT:\n", typeLines.join("\n\n"));
     console.log("OUTPUT:\n", generatedSchemaSource);
