@@ -334,9 +334,6 @@ function convertTypeTexts(
 
     const names = generatedNames;
 
-    console.log("INPUT:\n", typeLines.join("\n\n"));
-    console.log("OUTPUT:\n", generatedSchemaSource);
-
     const unsupportedRuntimeRefs = [
       "mongoose.",
       "HydratedDocument",

@@ -152,6 +152,7 @@ export interface RouteConfig {
   secure?: boolean;
   response?: z.ZodType;
   autoParamSchemas?: AutoParamStrategyMap;
+  secureWith?: string[];
 }
 
 export interface SmartRouterOptions {
@@ -228,13 +229,13 @@ export function registerSecurityScheme(input: SecuritySchemeInput) {
 
 export function createSmartRouter(options: SmartRouterOptions) {
   const expressRouter = Router();
-  const secureWith = options.secureWith ?? [];
 
   const register = (
     method: "get" | "post" | "put" | "patch" | "delete",
     path: string,
     config: RouteConfig,
   ) => {
+    const mergedSecureWith = config.secureWith ?? options.secureWith ?? [];
     const fullPath = `${options.basePath}${path}`.replace(/\/+/g, "/");
     const openApiPath = fullPath.replace(/:([a-zA-Z0-9_]+)/g, "{$1}");
 
@@ -317,8 +318,8 @@ export function createSmartRouter(options: SmartRouterOptions) {
       description: config.description,
       tags: config.tags || [options.tag],
       ...(config.secure &&
-        secureWith.length > 0 && {
-          security: [Object.fromEntries(secureWith.map((s) => [s, []]))],
+        mergedSecureWith.length > 0 && {
+          security: [Object.fromEntries(mergedSecureWith.map((s) => [s, []]))],
         }),
       request: {
         ...(config.body && {
