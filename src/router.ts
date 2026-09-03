@@ -53,7 +53,8 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
 
   // Handle objects - recurse into properties
   if (typeName === "ZodObject") {
-    const shape = def.shape();
+    // In Zod 3.x shape is an object, not a function
+    const shape = typeof def.shape === "function" ? def.shape() : def.shape;
     const next: Record<string, z.ZodTypeAny> = {};
     for (const [k, v] of Object.entries(shape)) {
       next[k] = stripUndefinedUnions(v as z.ZodTypeAny);
