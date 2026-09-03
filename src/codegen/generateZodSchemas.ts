@@ -249,8 +249,18 @@ export function generateZodSchemas(
     "",
   ].join("\n");
 
+  // FIX B: Transform z.union([z.undefined(), T]) → T.optional()
+  // This makes schemas OpenAPI-compatible by removing z.undefined() unions
+  const fixedContent = fileContent
+    // z.union([z.undefined(), T]) → T.optional()
+    .replace(/z\.union\(\[z\.undefined\(\),\s*([^[\]]+?)\]\)/g, "$1.optional()")
+    // z.union([T, z.undefined()]) → T.optional()
+    .replace(/z\.union\(\[([^[\]]+?),\s*z\.undefined\(\)\]\)/g, "$1.optional()")
+    // Remove .optional().optional() duplicates
+    .replace(/\.optional\(\)\.optional\(\)/g, ".optional()");
+
   ensureParentDirectory(options.outputPath);
-  writeFileSync(options.outputPath, fileContent);
+  writeFileSync(options.outputPath, fixedContent);
 
   if (failures.length > 0) {
     const detail = failures
