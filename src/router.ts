@@ -22,27 +22,39 @@ let generatedResponseSchemas: Record<string, GeneratedResponseSchemaEntry> = {};
 /**
  * FIX A: Runtime transformer to strip z.undefined() unions before OpenAPI conversion
  * Transforms z.union([z.undefined(), T]) → T.optional() at runtime
- * This handles both generated and hand-written schemas
+ * Built for Zod 4.x which uses _def.type
  */
-function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
-  const def = (schema as any)._def;
-  if (!def) return schema;
-
-  // Safety check: if we receive something that's not a Zod schema, return z.any()
+function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
+  // Strict validation - throw errors to find the problem
   if (Array.isArray(schema)) {
-    console.warn('[stripUndefinedUnions] Received array instead of Zod schema, returning z.any()');
-    return z.any();
+    throw new Error(
+      "[zod-response-oas] RAW ARRAY ENCOUNTERED. Malformed schema detected."
+    );
   }
 
-  // In Zod 3.x, type name is in _def.type, not _def.typeName
-  const typeName = def.typeName || def.type;
+  if (!schema || typeof schema !== "object") {
+    throw new Error(
+      "[zod-response-oas] NON-ZOD VALUE: " + String(schema)
+    );
+  }
+
+  const def = (schema as any)._def;
+
+  if (!def) {
+    throw new Error(
+      "[zod-response-oas] OBJECT WITHOUT _def"
+    );
+  }
+
+  // Zod 4.x uses _def.type
+  const typeName = def.type;
 
   // Handle unions
-  if (typeName === "ZodUnion" || typeName === "union") {
+  if (typeName === "union") {
     const options: z.ZodTypeAny[] = def.options ?? [];
     const nonUndef = options.filter((o) => {
-      const t = (o as any)._def?.typeName || (o as any)._def?.type;
-      return t !== "ZodUndefined" && t !== "undefined";
+      const t = (o as any)._def?.type;
+      return t !== "undefined";
     });
     
     // If we filtered out z.undefined() and have exactly one type left, make it optional
@@ -55,43 +67,40 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
       return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
     }
     
-    return schema;
+    // All options were undefined - shouldn't happen but return original
+    return schema as z.ZodTypeAny;
   }
 
   // Handle objects - recurse into properties
-  if (typeName === "ZodObject" || typeName === "object") {
-    // In Zod 3.x shape is an object, not a function
-    const shape = typeof def.shape === "function" ? def.shape() : def.shape;
+  if (typeName === "object") {
+    const shape = def.shape;
     const next: Record<string, z.ZodTypeAny> = {};
     for (const [k, v] of Object.entries(shape)) {
-      next[k] = stripUndefinedUnions(v as z.ZodTypeAny);
+      next[k] = stripUndefinedUnions(v);
     }
-    // Return plain object without passthrough to avoid potential issues
     return z.object(next);
   }
 
   // Handle arrays - recurse into element type
-  if (typeName === "ZodArray" || typeName === "array") {
-    const elementType = def.type || def.element;
-    if (!elementType || Array.isArray(elementType)) {
-      console.warn(`[stripUndefinedUnions] Invalid array element type:`, elementType);
-      return z.array(z.any());
+  if (typeName === "array") {
+    const elementType = def.element;
+    if (!elementType) {
+      throw new Error("[zod-response-oas] Array has no element in _def.element");
     }
     return z.array(stripUndefinedUnions(elementType));
   }
 
   // Handle optional - check if innerType is a union with undefined
-  if (typeName === "ZodOptional" || typeName === "optional") {
+  if (typeName === "optional") {
     const inner = def.innerType;
     const innerDef = (inner as any)._def;
-    const innerType = innerDef?.typeName || innerDef?.type;
     
     // If inner is a union with undefined, unwrap it
-    if (innerType === "ZodUnion" || innerType === "union") {
+    if (innerDef?.type === "union") {
       const options: z.ZodTypeAny[] = innerDef.options ?? [];
       const nonUndef = options.filter((o) => {
-        const t = (o as any)._def?.typeName || (o as any)._def?.type;
-        return t !== "ZodUndefined" && t !== "undefined";
+        const t = (o as any)._def?.type;
+        return t !== "undefined";
       });
       
       // If we have exactly one non-undefined type, use it as optional
@@ -110,16 +119,17 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
   }
 
   // Handle nullable - recurse into inner type
-  if (typeName === "ZodNullable" || typeName === "nullable") {
+  if (typeName === "nullable") {
     return stripUndefinedUnions(def.innerType).nullable();
   }
   
   // Handle intersections (.and())
-  if (typeName === "ZodIntersection" || typeName === "intersection") {
+  if (typeName === "intersection") {
     return stripUndefinedUnions(def.left).and(stripUndefinedUnions(def.right));
   }
 
-  return schema;
+  // For all other types, return as-is
+  return schema as z.ZodTypeAny;
 }
 
 export function useGeneratedResponseSchemas(
