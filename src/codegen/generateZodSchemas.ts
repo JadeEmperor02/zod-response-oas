@@ -317,7 +317,9 @@ function convertTypeTexts(
       cwd: tmpDir,
     });
 
-    const generatedSchemaSource = readFileSync(outputPath, "utf-8");
+    const generatedSchemaSource = scrubUndefinedUnionsInZodSource(
+      readFileSync(outputPath, "utf-8"),
+    );
 
     const generatedNames = [
       ...generatedSchemaSource.matchAll(
@@ -374,4 +376,67 @@ function convertTypeTexts(
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+function scrubUndefinedUnionsInZodSource(src: string): string {
+  let out = src;
+  let prev = "";
+  // Repeat until stable — nested unions need multiple passes
+  while (out !== prev) {
+    prev = out;
+    // z.union([z.undefined(), T]).optional() → T.optional()
+    out = out.replace(
+      /z\.union\(\[\s*z\.undefined\(\)\s*,\s*([\s\S]*?)\s*\]\)\.optional\(\)/g,
+      (_, inner) => {
+        const parts = splitTopLevelArgs(inner); // or simple path if T has no commas in z.xxx()
+        if (parts.length === 1) return `${parts[0].trim()}.optional()`;
+        return `z.union([${parts.join(", ")}]).optional()`;
+      },
+    );
+    // z.union([T, z.undefined()]).optional()
+    out = out.replace(
+      /z\.union\(\[\s*([\s\S]*?)\s*,\s*z\.undefined\(\)\s*\]\)\.optional\(\)/g,
+      (_, inner) => {
+        const parts = splitTopLevelArgs(inner);
+        if (parts.length === 1) return `${parts[0].trim()}.optional()`;
+        return `z.union([${parts.join(", ")}]).optional()`;
+      },
+    );
+    // Same without trailing .optional()
+    out = out.replace(
+      /z\.union\(\[\s*z\.undefined\(\)\s*,\s*([\s\S]*?)\s*\]\)/g,
+      (_, inner) => {
+        const parts = splitTopLevelArgs(inner);
+        if (parts.length === 1) return `${parts[0].trim()}.optional()`;
+        return `z.union([${parts.join(", ")}]).optional()`;
+      },
+    );
+    out = out.replace(
+      /z\.union\(\[\s*([\s\S]*?)\s*,\s*z\.undefined\(\)\s*\]\)/g,
+      (_, inner) => {
+        const parts = splitTopLevelArgs(inner);
+        if (parts.length === 1) return `${parts[0].trim()}.optional()`;
+        return `z.union([${parts.join(", ")}]).optional()`;
+      },
+    );
+  }
+  return out;
+}
+
+/** Split on commas at depth 0 (respect nested [], (), {}) */
+function splitTopLevelArgs(s: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) {
+      parts.push(s.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start).trim());
+  return parts.filter(Boolean);
 }

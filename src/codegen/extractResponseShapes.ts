@@ -633,9 +633,24 @@ function normalizeSerializableTypeInner(
       return `[${parts.join(", ")}]`;
     }
 
-    // Union — normalize each branch
+    // Union — normalize each branch; strip `undefined` so optionals
+    // become `foo?: T` instead of `foo?: T | undefined` → z.undefined()
     const unionParts = type.getUnionTypes();
     if (unionParts.length > 1) {
+      const nonUndef = unionParts.filter((p) => !p.isUndefined());
+
+      // Had undefined in the union — emit only the value side.
+      // Optionality is already expressed via `name?:` on object properties.
+      if (nonUndef.length < unionParts.length) {
+        if (nonUndef.length === 0) {
+          return "undefined"; // rare; avoid if you can
+        }
+        if (nonUndef.length === 1) {
+          return nonUndef
+            .map((p) => normalizeSerializableTypeInner(p, location, seen))
+            .join("|");
+        }
+      }
       return unionParts
         .map((p) => normalizeSerializableTypeInner(p, location, seen))
         .join(" | ");
