@@ -28,6 +28,12 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
   const def = (schema as any)._def;
   if (!def) return schema;
 
+  // Safety check: if we receive something that's not a Zod schema, return z.any()
+  if (Array.isArray(schema)) {
+    console.warn('[stripUndefinedUnions] Received array instead of Zod schema, returning z.any()');
+    return z.any();
+  }
+
   // In Zod 3.x, type name is in _def.type, not _def.typeName
   const typeName = def.typeName || def.type;
 
