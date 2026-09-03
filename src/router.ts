@@ -19,6 +19,66 @@ export interface GeneratedResponseSchemaEntry {
 
 let generatedResponseSchemas: Record<string, GeneratedResponseSchemaEntry> = {};
 
+/**
+ * FIX A: Runtime transformer to strip z.undefined() unions before OpenAPI conversion
+ * Transforms z.union([z.undefined(), T]) → T.optional() at runtime
+ * This handles both generated and hand-written schemas
+ */
+function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
+  const def = (schema as any)._def;
+  if (!def) return schema;
+
+  const typeName = def.typeName;
+
+  // Handle unions
+  if (typeName === "ZodUnion") {
+    const options: z.ZodTypeAny[] = def.options ?? [];
+    const nonUndef = options.filter((o) => {
+      const t = (o as any)._def?.typeName;
+      return t !== "ZodUndefined";
+    });
+    
+    // If we filtered out z.undefined() and have exactly one type left, make it optional
+    if (nonUndef.length === 1 && nonUndef.length < options.length) {
+      return stripUndefinedUnions(nonUndef[0]).optional();
+    }
+    
+    // Multiple non-undefined types: keep as union but recurse
+    if (nonUndef.length > 1) {
+      return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
+    }
+    
+    return schema;
+  }
+
+  // Handle objects - recurse into properties
+  if (typeName === "ZodObject") {
+    const shape = def.shape();
+    const next: Record<string, z.ZodTypeAny> = {};
+    for (const [k, v] of Object.entries(shape)) {
+      next[k] = stripUndefinedUnions(v as z.ZodTypeAny);
+    }
+    return z.object(next);
+  }
+
+  // Handle arrays - recurse into element type
+  if (typeName === "ZodArray") {
+    return z.array(stripUndefinedUnions(def.type));
+  }
+
+  // Handle optional - recurse into inner type
+  if (typeName === "ZodOptional") {
+    return stripUndefinedUnions(def.innerType).optional();
+  }
+
+  // Handle nullable - recurse into inner type
+  if (typeName === "ZodNullable") {
+    return stripUndefinedUnions(def.innerType).nullable();
+  }
+
+  return schema;
+}
+
 export function useGeneratedResponseSchemas(
   schemas: Record<string, GeneratedResponseSchemaEntry>,
 ) {
@@ -302,7 +362,7 @@ export function createSmartRouter(options: SmartRouterOptions) {
           options.requireGeneratedResponses ?? false,
         );
 
-    const successSchema =
+    let successSchema =
       resolvedEntry === undefined
         ? z.any()
         : resolvedEntry.schema === null
@@ -310,6 +370,9 @@ export function createSmartRouter(options: SmartRouterOptions) {
           : resolvedEntry.kind === "response"
             ? resolvedEntry.schema
             : zSuccessResponse(resolvedEntry.schema);
+
+    // Apply runtime transformer to strip z.undefined() unions
+    successSchema = stripUndefinedUnions(successSchema);
 
     openApiRegistry.registerPath({
       method,
