@@ -65,7 +65,8 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
 
   // Handle arrays - recurse into element type
   if (typeName === "ZodArray" || typeName === "array") {
-    return z.array(stripUndefinedUnions(def.type));
+    const elementType = def.type || def.element;
+    return z.array(stripUndefinedUnions(elementType));
   }
 
   // Handle optional - check if innerType is a union with undefined
