@@ -77,6 +77,15 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
     // Multiple non-undefined types: keep as union but recurse
     if (nonUndef.length > 1) {
       const transformed = nonUndef.map(stripUndefinedUnions);
+      
+      // Check if any transformed type is 'never'
+      const hasNever = transformed.some((t) => (t as any)._def?.type === 'never');
+      if (hasNever) {
+        console.warn("[stripUndefinedUnions] Union contains z.never() after transformation");
+        console.warn("Original options:", nonUndef.map((o) => (o as any)._def?.type));
+        console.warn("Transformed types:", transformed.map((t) => (t as any)._def?.type));
+      }
+      
       // Ensure we have at least 2 valid schemas for union
       if (transformed.length < 2) {
         throw new Error(
