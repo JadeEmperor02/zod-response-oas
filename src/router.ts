@@ -362,17 +362,23 @@ export function createSmartRouter(options: SmartRouterOptions) {
           options.requireGeneratedResponses ?? false,
         );
 
-    let successSchema =
-      resolvedEntry === undefined
-        ? z.any()
-        : resolvedEntry.schema === null
-          ? zSuccessResponse()
-          : resolvedEntry.kind === "response"
-            ? resolvedEntry.schema
-            : zSuccessResponse(resolvedEntry.schema);
-
-    // Apply runtime transformer to strip z.undefined() unions
-    successSchema = stripUndefinedUnions(successSchema);
+    let successSchema: z.ZodTypeAny;
+    
+    if (resolvedEntry === undefined) {
+      successSchema = z.any();
+    } else if (resolvedEntry.schema === null) {
+      successSchema = zSuccessResponse();
+    } else {
+      // Apply transformer BEFORE wrapping
+      const cleanedSchema = stripUndefinedUnions(resolvedEntry.schema);
+      
+      if (resolvedEntry.kind === "response") {
+        successSchema = cleanedSchema;
+      } else {
+        // kind === "data" - wrap the cleaned schema
+        successSchema = zSuccessResponse(cleanedSchema);
+      }
+    }
 
     openApiRegistry.registerPath({
       method,
