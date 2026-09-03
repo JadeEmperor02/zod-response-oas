@@ -49,13 +49,25 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
   // Zod 4.x uses _def.type
   const typeName = def.type;
 
-  // Handle unions
+  // Handle unions - strip z.undefined()
   if (typeName === "union") {
     const options: z.ZodTypeAny[] = def.options ?? [];
+    
+    // If no options, return original
+    if (options.length === 0) {
+      return schema as z.ZodTypeAny;
+    }
+    
     const nonUndef = options.filter((o) => {
       const t = (o as any)._def?.type;
       return t !== "undefined";
     });
+    
+    // If all options were undefined, this shouldn't happen but return z.never()
+    if (nonUndef.length === 0) {
+      console.warn("[stripUndefinedUnions] Union with only z.undefined() found, returning z.never()");
+      return z.never();
+    }
     
     // If we filtered out z.undefined() and have exactly one type left, make it optional
     if (nonUndef.length === 1 && nonUndef.length < options.length) {
@@ -67,7 +79,7 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
       return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
     }
     
-    // All options were undefined - shouldn't happen but return original
+    // No filtering happened - return original
     return schema as z.ZodTypeAny;
   }
 
