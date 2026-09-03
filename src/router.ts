@@ -48,6 +48,11 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
 
   // Zod 4.x uses _def.type
   const typeName = def.type;
+  
+  // Log if we encounter a never type
+  if (typeName === 'never') {
+    console.warn("[stripUndefinedUnions] Encountered z.never() - passing through");
+  }
 
   // Handle unions - strip z.undefined()
   if (typeName === "union") {
