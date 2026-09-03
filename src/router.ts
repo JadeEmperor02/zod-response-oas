@@ -66,7 +66,8 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
     for (const [k, v] of Object.entries(shape)) {
       next[k] = stripUndefinedUnions(v as z.ZodTypeAny);
     }
-    return z.object(next).passthrough(); // preserve catchall behavior
+    // Return plain object without passthrough to avoid potential issues
+    return z.object(next);
   }
 
   // Handle arrays - recurse into element type
