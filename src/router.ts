@@ -66,9 +66,32 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
     return z.array(stripUndefinedUnions(def.type));
   }
 
-  // Handle optional - recurse into inner type
+  // Handle optional - check if innerType is a union with undefined
   if (typeName === "ZodOptional") {
-    return stripUndefinedUnions(def.innerType).optional();
+    const inner = def.innerType;
+    const innerDef = (inner as any)._def;
+    
+    // If inner is a union with undefined, unwrap it
+    if (innerDef?.typeName === "ZodUnion") {
+      const options: z.ZodTypeAny[] = innerDef.options ?? [];
+      const nonUndef = options.filter((o) => {
+        const t = (o as any)._def?.typeName;
+        return t !== "ZodUndefined";
+      });
+      
+      // If we have exactly one non-undefined type, use it as optional
+      if (nonUndef.length === 1 && nonUndef.length < options.length) {
+        return stripUndefinedUnions(nonUndef[0]).optional();
+      }
+      
+      // Multiple non-undefined types: keep as union but recurse
+      if (nonUndef.length > 1) {
+        return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]).optional();
+      }
+    }
+    
+    // Normal optional, just recurse
+    return stripUndefinedUnions(inner).optional();
   }
 
   // Handle nullable - recurse into inner type
