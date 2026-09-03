@@ -357,3 +357,85 @@ Known limitations:
   purpose.
 - Not framework-agnostic (Express-specific for now).
 - Not a substitute for reading your OpenAPI output before shipping.
+
+
+## Troubleshooting
+
+### `z.never()` type error during OpenAPI generation
+
+**Error message:**
+```
+[zod-response-oas] CRITICAL: z.never() type encountered in generated schema!
+
+This usually means TypeScript inferred an impossible type in your controller code.
+```
+
+**What this means:**
+
+The library detected a `z.never()` type in your generated Zod schemas. This happens when TypeScript's type inference determines that a code path returns an "impossible" type (never can be assigned). Common causes:
+
+1. **Type narrowing confusion** - Using if/else branches where TypeScript narrows a variable to an impossible state:
+   ```typescript
+   // ❌ BAD - TypeScript infers second return as never[]
+   const items = await Model.find();
+   if (items && items.length > 0) {
+     return sendSuccess(res, { data: items });
+   }
+   return sendSuccess(res, { data: [] }); // TypeScript: "items can't be empty here!"
+   ```
+
+2. **Missing return type annotations** - TypeScript fails to infer a consistent return type across branches
+3. **Complex type guards** - Conditional logic that confuses TypeScript's inference engine
+
+**How to fix:**
+
+**Option 1: Simplify conditional logic (recommended)**
+```typescript
+// ✅ GOOD - Single return path, no type narrowing issues
+const items = await Model.find();
+return sendSuccess(res, { 
+  data: items, 
+  statusCode: items.length > 0 ? 200 : 404 
+});
+```
+
+**Option 2: Add explicit return type**
+```typescript
+// ✅ GOOD - Explicit return type prevents bad inference
+export async function getItems(
+  req: Request, 
+  res: Response
+): Promise<Response> {
+  const items = await Model.find();
+  if (items && items.length > 0) {
+    return sendSuccess(res, { data: items });
+  }
+  return sendSuccess(res, { data: [] });
+}
+```
+
+**Option 3: Use explicit response schema**
+```typescript
+// ✅ GOOD - Bypass auto-generation for problematic routes
+router.get('/items', {
+  response: z.array(itemSchema),
+  handler: getItems
+});
+```
+
+After fixing, regenerate schemas:
+```bash
+npm run generate:response-schemas
+```
+
+### Why the library throws instead of working around it
+
+Earlier versions (v1.0.11-v1.0.26) attempted to handle `z.never()` at runtime by passing it through or replacing it with `z.any()`. This masked the real problem: TypeScript type inference issues in your controller code.
+
+Starting in v1.0.28+, the library **fails fast** with a clear error message so you can fix the root cause. This results in:
+- More accurate OpenAPI documentation
+- Better type safety
+- Fewer surprises when the generated schema doesn't match your actual data
+- Clear guidance on how to fix the issue
+
+The library's job is to extract and convert what TypeScript infers. When TypeScript infers `never`, that's a signal that something's wrong with the source code, not the schema generation.

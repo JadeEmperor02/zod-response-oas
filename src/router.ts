@@ -49,9 +49,21 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
   // Zod 4.x uses _def.type
   const typeName = def.type;
   
-  // Log if we encounter a never type
+  // Throw error if we encounter a never type - this indicates a TypeScript inference issue
   if (typeName === 'never') {
-    console.warn("[stripUndefinedUnions] Encountered z.never() - passing through");
+    throw new Error(
+      `[zod-response-oas] CRITICAL: z.never() type encountered in generated schema!\n\n` +
+      `This usually means TypeScript inferred an impossible type in your controller code.\n` +
+      `Common causes:\n` +
+      `  1. Type narrowing makes a code path appear unreachable (e.g., if/else with array.length checks)\n` +
+      `  2. Returning different types from conditional branches without explicit return type\n` +
+      `  3. Complex type guards that confuse TypeScript's inference\n\n` +
+      `Fix options:\n` +
+      `  1. Simplify conditional logic (e.g., use ternary in return instead of if/else)\n` +
+      `  2. Add explicit return type annotation to the handler function\n` +
+      `  3. Ensure all return paths use consistent types\n\n` +
+      `After fixing, regenerate schemas with: npm run generate:response-schemas`
+    );
   }
 
   // Handle unions - strip z.undefined()
@@ -82,14 +94,6 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
     // Multiple non-undefined types: keep as union but recurse
     if (nonUndef.length > 1) {
       const transformed = nonUndef.map(stripUndefinedUnions);
-      
-      // Check if any transformed type is 'never'
-      const hasNever = transformed.some((t) => (t as any)._def?.type === 'never');
-      if (hasNever) {
-        console.warn("[stripUndefinedUnions] Union contains z.never() after transformation");
-        console.warn("Original options:", nonUndef.map((o) => (o as any)._def?.type));
-        console.warn("Transformed types:", transformed.map((t) => (t as any)._def?.type));
-      }
       
       // Ensure we have at least 2 valid schemas for union
       if (transformed.length < 2) {
