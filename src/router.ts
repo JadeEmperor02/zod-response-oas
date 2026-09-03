@@ -76,7 +76,14 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
     
     // Multiple non-undefined types: keep as union but recurse
     if (nonUndef.length > 1) {
-      return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
+      const transformed = nonUndef.map(stripUndefinedUnions);
+      // Ensure we have at least 2 valid schemas for union
+      if (transformed.length < 2) {
+        throw new Error(
+          "[stripUndefinedUnions] Union transformation resulted in < 2 options"
+        );
+      }
+      return z.union(transformed as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
     }
     
     // No filtering happened - return original
@@ -122,7 +129,13 @@ function stripUndefinedUnions(schema: unknown): z.ZodTypeAny {
       
       // Multiple non-undefined types: keep as union but recurse
       if (nonUndef.length > 1) {
-        return z.union(nonUndef.map(stripUndefinedUnions) as [z.ZodTypeAny, ...z.ZodTypeAny[]]).optional();
+        const transformed = nonUndef.map(stripUndefinedUnions);
+        if (transformed.length < 2) {
+          throw new Error(
+            "[stripUndefinedUnions] Optional union transformation resulted in < 2 options"
+          );
+        }
+        return z.union(transformed as [z.ZodTypeAny, ...z.ZodTypeAny[]]).optional();
       }
     }
     
