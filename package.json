@@ -1,6 +1,6 @@
 {
   "name": "zod-response-oas",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Express + Zod router that validates requests, and infers OpenAPI response schemas directly from your sendSuccess()/sendError() call sites — no separate response schema to write or keep in sync.",
   "type": "module",
   "main": "dist/index.js",
