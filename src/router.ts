@@ -58,7 +58,7 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
     for (const [k, v] of Object.entries(shape)) {
       next[k] = stripUndefinedUnions(v as z.ZodTypeAny);
     }
-    return z.object(next);
+    return z.object(next).passthrough(); // preserve catchall behavior
   }
 
   // Handle arrays - recurse into element type
@@ -74,6 +74,11 @@ function stripUndefinedUnions(schema: z.ZodTypeAny): z.ZodTypeAny {
   // Handle nullable - recurse into inner type
   if (typeName === "ZodNullable") {
     return stripUndefinedUnions(def.innerType).nullable();
+  }
+  
+  // Handle intersections (.and())
+  if (typeName === "ZodIntersection") {
+    return stripUndefinedUnions(def.left).and(stripUndefinedUnions(def.right));
   }
 
   return schema;
@@ -373,10 +378,12 @@ export function createSmartRouter(options: SmartRouterOptions) {
       const cleanedSchema = stripUndefinedUnions(resolvedEntry.schema);
       
       if (resolvedEntry.kind === "response") {
-        successSchema = cleanedSchema;
+        // Response schemas are already wrapped, clean the whole thing
+        successSchema = stripUndefinedUnions(cleanedSchema);
       } else {
-        // kind === "data" - wrap the cleaned schema
-        successSchema = zSuccessResponse(cleanedSchema);
+        // kind === "data" - wrap the cleaned schema and clean the wrapper too
+        const wrapped = zSuccessResponse(cleanedSchema);
+        successSchema = stripUndefinedUnions(wrapped);
       }
     }
 
